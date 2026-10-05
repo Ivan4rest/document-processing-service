@@ -1,0 +1,29 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://docs:docs@db:5432/docs
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - uploads:/srv/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: docs
+      POSTGRES_PASSWORD: docs
+      POSTGRES_DB: docs
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docs"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+volumes:
+  uploads:
+  pgdata:

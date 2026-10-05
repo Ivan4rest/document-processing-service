@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Обработка документов</title>
+<style>
+  :root { --bg:#0f1b2a; --card:#16283a; --line:#24405a; --text:#e8f0f5; --muted:#8fa6b8; --accent:#2ecc71; --bad:#e5604d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:960px; margin:0 auto; padding:32px 16px; }
+  h1 { margin:0 0 4px; font-size:26px; }
+  p.lead { margin:0 0 24px; color:var(--muted); }
+  .drop { display:block; border:2px dashed var(--line); border-radius:12px; padding:28px; text-align:center; cursor:pointer; background:var(--card); }
+  .drop:hover, .drop.over { border-color:var(--accent); }
+  .drop input { display:none; }
+  .doc { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:16px; }
+  .head { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .name { font-weight:600; overflow-wrap:anywhere; }
+  .badge { font-size:12px; padding:2px 10px; border-radius:99px; border:1px solid var(--line); color:var(--muted); }
+  .badge.done { color:var(--accent); border-color:var(--accent); }
+  .badge.failed { color:var(--bad); border-color:var(--bad); }
+  dl { display:grid; grid-template-columns:max-content 1fr; gap:4px 16px; margin:12px 0 0; }
+  dt { color:var(--muted); } dd { margin:0; overflow-wrap:anywhere; }
+  .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; margin-top:12px; font-size:14px; }
+  th, td { text-align:left; padding:6px 8px; border-top:1px solid var(--line); }
+  th { color:var(--muted); font-weight:400; } td.num, th.num { text-align:right; white-space:nowrap; }
+  .err { color:var(--bad); margin-top:8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Обработка документов</h1>
+  <p class="lead">Загрузите счёт или акт (PDF, PNG, JPG, TXT) — сервис извлечёт реквизиты, суммы и позиции.</p>
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept=".pdf,.png,.jpg,.jpeg,.txt" multiple>
+    Перетащите файлы сюда или нажмите, чтобы выбрать
+  </label>
+  <div id="list"></div>
+</main>
+<script>
+const list = document.getElementById('list'), drop = document.getElementById('drop');
+const labels = {queued:'в очереди', processing:'обрабатывается', done:'готово', failed:'ошибка'};
+const money = v => v == null ? '—' : v.toLocaleString('ru-RU', {minimumFractionDigits: 2});
+const esc = s => String(s ?? '—').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function render(doc) {
+  const r = doc.result;
+  let body = '';
+  if (doc.error) body = `<div class="err">${esc(doc.error)}</div>`;
+  if (r) {
+    const rows = [['Тип', r.doc_type], ['Номер', r.number], ['Дата', r.date], ['Поставщик', r.seller],
+      ['ИНН поставщика', r.seller_inn], ['Покупатель', r.buyer], ['ИНН покупателя', r.buyer_inn],
+      ['НДС', r.vat == null ? null : money(r.vat)], ['Итого', r.total == null ? null : `${money(r.total)} ${r.currency ?? ''}`]];
+    body = `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
+    if (r.items.length) body += `<div class="scroll"><table><tr><th>Позиция</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Сумма</th></tr>${
+      r.items.map(i => `<tr><td>${esc(i.name)}</td><td class="num">${esc(i.quantity)}</td><td class="num">${money(i.unit_price)}</td><td class="num">${money(i.amount)}</td></tr>`).join('')}</table></div>`;
+  }
+  const engine = doc.engine ? `<span class="badge">${doc.engine === 'claude' ? 'ИИ' : 'правила'}</span>` : '';
+  return `<div class="head"><span class="name">${esc(doc.filename)}</span><span class="badge ${doc.status}">${labels[doc.status]}</span>${engine}</div>${body}`;
+}
+
+function show(doc) {
+  let el = document.getElementById(doc.id);
+  if (!el) { el = document.createElement('div'); el.className = 'doc'; el.id = doc.id; list.prepend(el); }
+  el.innerHTML = render(doc);
+  if (doc.status === 'queued' || doc.status === 'processing')
+    setTimeout(async () => show(await (await fetch(`/documents/${doc.id}`)).json()), 1000);
+}
+
+async function send(files) {
+  for (const file of files) {
+    const form = new FormData(); form.append('file', file);
+    const response = await fetch('/documents', {method: 'POST', body: form});
+    const data = await response.json();
+    if (response.ok) show(data);
+    else show({id: crypto.randomUUID(), filename: file.name, status: 'failed', error: data.detail});
+  }
+}
+
+document.getElementById('file').addEventListener('change', e => { send(e.target.files); e.target.value = ''; });
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); send(e.dataTransfer.files); });
+fetch('/documents').then(r => r.json()).then(docs => docs.reverse().forEach(show));
+</script>
+</body>
+</html>
