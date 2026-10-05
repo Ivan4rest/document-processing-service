@@ -10,3 +10,12 @@ jobs:
           python-version: "3.13"
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: python -m pytest
+      - name: Smoke test in Docker with PostgreSQL
+        run: |
+          docker compose up -d --build
+          for i in $(seq 1 60); do curl -sf localhost:8000/health && break; sleep 1; done
+          ID=$(curl -sf -F "file=@samples/invoice_147.pdf;type=application/pdf" localhost:8000/documents | python -c "import sys,json;print(json.load(sys.stdin)['id'])")
+          sleep 3
+          curl -sf localhost:8000/documents/$ID | tee result.json
+          grep -q '"status":"done"' result.json
+          grep -q '"total":65000.0' result.json
